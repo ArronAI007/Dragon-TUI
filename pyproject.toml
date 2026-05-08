@@ -14,3 +14,8 @@ dependencies = [
 
 [project.scripts]
 dragon-tui = "app:main"
+dragon = "app:main"
+
+[tool.setuptools]
+py-modules = ["app", "config"]
+packages = ["api", "mcp", "session", "tools", "ui"]

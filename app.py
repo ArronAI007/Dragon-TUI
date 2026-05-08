@@ -1,9 +1,9 @@
 """dragon-tui: A terminal UI for DeepSeek API with theme support.
 
 Usage:
-    dragon-tui              # auto-load config
-    dragon-tui --config ./config.toml
-    DEEPSEEK_API_KEY=sk-xxx dragon-tui
+    dragon                  # auto-load config
+    dragon --config ./config.toml
+    DEEPSEEK_API_KEY=sk-xxx dragon
 """
 
 from __future__ import annotations

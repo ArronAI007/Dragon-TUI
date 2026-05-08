@@ -16,9 +16,11 @@ python app.py --config ./config.toml
 
 ```bash
 pip install -e .
-dragon-tui
-dragon-tui --config ./config.toml
+dragon
+dragon --config ./config.toml
 ```
+
+> 也兼容旧命令 `dragon-tui`。
 
 ### 3. 打包/分发安装
 
@@ -32,7 +34,7 @@ dragon-tui --config ./config.toml
 
 必须配置 API Key，程序按以下优先级读取：
 
-1. 环境变量：`DEEPSEEK_API_KEY=sk-xxx python app.py`
+1. 环境变量：`DEEPSEEK_API_KEY=sk-xxx dragon`
 2. 当前目录的 `config.toml`
 3. `~/.dragon/config.toml`
 
@@ -58,4 +60,4 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-核心依赖：`textual`, `httpx`, `pydantic`, `tiktoken`。
+核心依赖：`textual`, `httpx`, `pydantic`, `tiktoken`。安装后即可使用 `dragon` 命令启动。

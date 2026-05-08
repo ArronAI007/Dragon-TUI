@@ -21,14 +21,21 @@ mkdir -p "$LIB_DIR"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cp -R "$SCRIPT_DIR/dist/DeepSeekTUI/"* "$LIB_DIR/"
 
-# Create wrapper script
+# Create wrapper scripts
 cat > "$BIN_DIR/dragon-tui" << 'WRAPPER'
 #!/usr/bin/env bash
 exec "$(dirname "$(readlink -f "$0")")/../lib/dragon-tui/dragon-tui" "$@"
 WRAPPER
 chmod +x "$BIN_DIR/dragon-tui"
 
+cat > "$BIN_DIR/dragon" << 'WRAPPER'
+#!/usr/bin/env bash
+exec "$(dirname "$(readlink -f "$0")")/../lib/dragon-tui/dragon-tui" "$@"
+WRAPPER
+chmod +x "$BIN_DIR/dragon"
+
 echo "  binary: $BIN_DIR/dragon-tui"
+echo "  binary: $BIN_DIR/dragon"
 echo "  lib:    $LIB_DIR"
 
 # Add to PATH if needed
@@ -39,4 +46,4 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 echo ""
-echo "✅ Installation complete. Run: dragon-tui"
+echo "✅ Installation complete. Run: dragon (or dragon-tui)"
