@@ -46,6 +46,7 @@ def _extract_flat(data: dict) -> dict[str, str]:
         "context_buffer_ratio": "context_buffer_ratio",
         "theme": "theme",
         "code_theme": "code_theme",
+        "system_prompt": "system_prompt",
     }
     for toml_key, setting_key in key_map.items():
         if toml_key in data:
@@ -129,6 +130,9 @@ class Settings(BaseSettings):
     # ── Theme ──────────────────────────────────────────
     theme: str = "dark"         # "dark" | "light"
     code_theme: str = "one-dark"
+
+    # ── System prompt ──────────────────────────────────
+    system_prompt: str = "You are Dragon TUI, a helpful AI assistant."
 
     # ── MCP (not managed by pydantic-settings) ────────
     # Set externally by load_settings().

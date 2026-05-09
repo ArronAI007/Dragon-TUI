@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import time
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Static, TextArea
 
 from api.client import ChatResponse, DragonClient, ToolCall as APIToolCall
 from api.errors import TUIError, classify
@@ -26,6 +27,7 @@ from session.storage import SessionRecord, SessionStorage
 from tools.builtins import registry
 from tools.registry import ToolCall, ToolDef, ToolResult
 from ui.chat_input import ChatInput
+from ui.command_suggestions import CommandSuggestions
 from ui.error_widget import ErrorWidget
 from ui.markdown_message import MarkdownMessage
 from ui.session_screen import SessionListScreen
@@ -77,6 +79,21 @@ class ChatApp(App):
         padding: 0 2;
     }
 
+    #command-suggestions {
+        display: none;
+        dock: bottom;
+        height: auto;
+        max-height: 12;
+        width: 100%;
+        background: $surface;
+        border: solid $primary-darken-2;
+        padding: 0;
+    }
+
+    #command-suggestions.visible {
+        display: block;
+    }
+
     #chat-input {
         dock: bottom;
         height: auto;
@@ -102,6 +119,7 @@ class ChatApp(App):
         ("ctrl+m", "cycle_model", "Model"),
         ("ctrl+r", "cycle_reasoning", "Reasoning"),
         ("ctrl+t", "toggle_tools", "Tools"),
+        ("ctrl+y", "copy_last", "Copy"),
     ]
 
     REASONING_LEVELS = ["off", "low", "medium", "high", "max"]
@@ -117,6 +135,8 @@ class ChatApp(App):
             max_tokens=settings.max_context_tokens,
             buffer_ratio=settings.context_buffer_ratio,
         )
+        if settings.system_prompt:
+            self.conversation.set_system(settings.system_prompt)
         self.storage = SessionStorage(
             Path(getattr(settings, "session_dir", str(DEFAULT_SESSION_DIR)))
         )
@@ -128,6 +148,7 @@ class ChatApp(App):
         yield Header()
         yield VerticalScroll(id="message-list")
         yield Static("", id="status-bar")
+        yield CommandSuggestions(COMMAND_HELP, id="command-suggestions")
         yield ChatInput(id="chat-input")
         yield Footer()
 
@@ -236,6 +257,8 @@ class ChatApp(App):
 
     async def action_clear(self) -> None:
         self.conversation.clear()
+        if self.settings.system_prompt:
+            self.conversation.set_system(self.settings.system_prompt)
         msg_list = self.query_one("#message-list", VerticalScroll)
         await msg_list.remove_children()
         self._session_id = self.storage.new_id()
@@ -282,6 +305,57 @@ class ChatApp(App):
         self._tools_enabled = not self._tools_enabled
         state = "ON" if self._tools_enabled else "OFF"
         self._flash_status(f"Tool calling: {state}")
+
+    async def action_copy_last(self) -> None:
+        """Copy the last assistant or user message to the system clipboard."""
+        msg_list = self.query_one("#message-list", VerticalScroll)
+        for child in reversed(msg_list.children):
+            if isinstance(child, MarkdownMessage):
+                text = child.content.strip()
+                if text:
+                    if self._copy_to_clipboard(text):
+                        preview = text[:40].replace("\n", " ")
+                        if len(text) > 40:
+                            preview += "…"
+                        self._flash_status(f"Copied: {preview}")
+                    else:
+                        self._flash_status("Copy failed — no clipboard tool found")
+                    return
+        self._flash_status("Nothing to copy")
+
+    @staticmethod
+    def _copy_to_clipboard(text: str) -> bool:
+        """Cross-platform clipboard copy without extra dependencies."""
+        import platform
+        import shutil
+
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                subprocess.run(["pbcopy"], input=text.encode(), check=True)
+                return True
+            if system == "Windows":
+                subprocess.run(["clip"], input=text.encode("gbk"), check=True)
+                return True
+            # Linux / WSL
+            for cmd in ("wl-copy", "xclip", "xsel"):
+                if shutil.which(cmd):
+                    if cmd == "wl-copy":
+                        subprocess.run([cmd], input=text.encode(), check=True)
+                    elif cmd == "xclip":
+                        subprocess.run(
+                            [cmd, "-selection", "clipboard"],
+                            input=text.encode(), check=True,
+                        )
+                    else:  # xsel
+                        subprocess.run(
+                            [cmd, "--clipboard", "--input"],
+                            input=text.encode(), check=True,
+                        )
+                    return True
+        except Exception:
+            pass
+        return False
 
     # ── Session persistence ───────────────────────────────
 
@@ -365,6 +439,49 @@ class ChatApp(App):
 
     # ── Input handler ─────────────────────────────────────
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Show/hide inline command suggestions when typing '/'."""
+        if event.text_area.id != "chat-input":
+            return
+        txt = event.text_area.text
+        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+        chat_input = self.query_one("#chat-input", ChatInput)
+        if txt.startswith("/"):
+            suggestions.filter(txt.lstrip("/"))
+            suggestions.add_class("visible")
+            chat_input.set_suggestions_visible(True)
+        else:
+            if suggestions.has_class("visible"):
+                suggestions.remove_class("visible")
+                chat_input.set_suggestions_visible(False)
+
+    def on_chat_input_suggestion_next(self, event: ChatInput.SuggestionNext) -> None:
+        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+        suggestions.next_option()
+
+    def on_chat_input_suggestion_prev(self, event: ChatInput.SuggestionPrev) -> None:
+        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+        suggestions.prev_option()
+
+    def on_chat_input_suggestion_select(self, event: ChatInput.SuggestionSelect) -> None:
+        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+        selected = suggestions.get_selected()
+        chat_input = self.query_one("#chat-input", ChatInput)
+        if selected:
+            self._run_command(selected)
+            chat_input.text = ""
+        suggestions.remove_class("visible")
+        chat_input.set_suggestions_visible(False)
+        chat_input.focus()
+
+    def on_chat_input_suggestion_dismiss(self, event: ChatInput.SuggestionDismiss) -> None:
+        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+        chat_input = self.query_one("#chat-input", ChatInput)
+        suggestions.remove_class("visible")
+        chat_input.set_suggestions_visible(False)
+        chat_input.text = ""
+        chat_input.focus()
+
     async def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         text = event.text.strip()
         if not text:
@@ -405,6 +522,10 @@ class ChatApp(App):
     def _set_model(self, arg: str) -> None:
         alias = arg.strip().lower()
         model_map = {"chat": "deepseek-chat", "pro": "deepseek-v4-pro", "v4": "deepseek-v4-pro"}
+        if not alias:
+            # Cycle between chat and pro
+            current = self.settings.default_model
+            alias = "pro" if current == "deepseek-chat" else "chat"
         if alias in model_map:
             self.settings.default_model = model_map[alias]
             self.conversation = ConversationManager(
@@ -412,6 +533,8 @@ class ChatApp(App):
                 max_tokens=self.settings.max_context_tokens,
                 buffer_ratio=self.settings.context_buffer_ratio,
             )
+            if self.settings.system_prompt:
+                self.conversation.set_system(self.settings.system_prompt)
             self._update_status()
             self._flash_status(f"Model → {model_map[alias]}")
         else:
@@ -421,6 +544,11 @@ class ChatApp(App):
 
     def _set_reasoning(self, arg: str) -> None:
         level = arg.strip().lower()
+        if not level:
+            # Cycle to next level
+            current = self.settings.reasoning_effort
+            idx = self.REASONING_LEVELS.index(current)
+            level = self.REASONING_LEVELS[(idx + 1) % len(self.REASONING_LEVELS)]
         if level in self.REASONING_LEVELS:
             self.settings.reasoning_effort = level
             self._update_status()
@@ -563,7 +691,7 @@ class ChatApp(App):
             tool_widgets: list[ToolCallWidget] = []
 
             for tc_raw in resp.tool_calls:
-                tc = ToolCall.from_openai(tc_raw)
+                tc = APIToolCall.from_openai(tc_raw)
                 tool_call_objs.append(tc)
 
                 widget = ToolCallWidget(tc)
@@ -627,7 +755,7 @@ def main():
         raise SystemExit(1)
 
     app = ChatApp(settings)
-    app.run()
+    app.run(mouse=False)
 
 
 if __name__ == "__main__":

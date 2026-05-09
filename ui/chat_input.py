@@ -30,6 +30,22 @@ class ChatInput(TextArea):
             super().__init__()
             self.text = text
 
+    class SuggestionNext(Message):
+        """Move to next suggestion."""
+        pass
+
+    class SuggestionPrev(Message):
+        """Move to previous suggestion."""
+        pass
+
+    class SuggestionSelect(Message):
+        """Select current suggestion."""
+        pass
+
+    class SuggestionDismiss(Message):
+        """Dismiss suggestions."""
+        pass
+
     # ── Lifecycle ───────────────────────────────────────
 
     def __init__(
@@ -43,6 +59,7 @@ class ChatInput(TextArea):
         self._history_cursor: int = -1
         self._draft_saved: str = ""
         self._max_history = max_history
+        self._suggestions_visible: bool = False
 
         # ── Search mode state ─────────────────────────
         self._search_mode: bool = False
@@ -67,6 +84,10 @@ class ChatInput(TextArea):
         if len(self._history) > self._max_history:
             self._history.pop()
         self._history_cursor = -1
+
+    def set_suggestions_visible(self, visible: bool) -> None:
+        """Toggle whether suggestion navigation keys are active."""
+        self._suggestions_visible = visible
 
     # ── Persistence ───────────────────────────────────
 
@@ -116,6 +137,29 @@ class ChatInput(TextArea):
             event.prevent_default()
             event.stop()
             return
+
+        # ── Suggestions visible ─────────────────────────
+        if self._suggestions_visible:
+            if key == "down":
+                self.post_message(self.SuggestionNext())
+                event.prevent_default()
+                event.stop()
+                return
+            if key == "up":
+                self.post_message(self.SuggestionPrev())
+                event.prevent_default()
+                event.stop()
+                return
+            if key in ("enter", "tab"):
+                self.post_message(self.SuggestionSelect())
+                event.prevent_default()
+                event.stop()
+                return
+            if key == "escape":
+                self.post_message(self.SuggestionDismiss())
+                event.prevent_default()
+                event.stop()
+                return
 
         # ── Enter (submit) ─────────────────────────────
         if key == "enter" and not shift:
