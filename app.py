@@ -30,6 +30,7 @@ from ui.chat_input import ChatInput
 from ui.command_suggestions import CommandSuggestions
 from ui.error_widget import ErrorWidget
 from ui.markdown_message import MarkdownMessage
+from ui.model_screen import ModelListScreen
 from ui.session_screen import SessionListScreen
 from ui.shell_approve import ShellApprovalScreen
 from ui.themes import cycle_code_theme, get_code_theme, set_code_theme, switch_mode
@@ -280,18 +281,7 @@ class ChatApp(App):
         await self._load_session(result)
 
     async def action_cycle_model(self) -> None:
-        models = ["deepseek-chat", "deepseek-v4-pro"]
-        current = self.settings.default_model
-        idx = models.index(current) if current in models else -1
-        next_idx = (idx + 1) % len(models)
-        self.settings.default_model = models[next_idx]
-        self.conversation = ConversationManager(
-            model=models[next_idx],
-            max_tokens=self.settings.max_context_tokens,
-            buffer_ratio=self.settings.context_buffer_ratio,
-        )
-        self._update_status()
-        self._flash_status(f"Model → {models[next_idx]}")
+        self._set_model("")
 
     async def action_cycle_reasoning(self) -> None:
         current = self.settings.reasoning_effort
@@ -432,10 +422,10 @@ class ChatApp(App):
             f"  {tools}{mcp}"
         )
 
-    async def _flash_status(self, text: str) -> None:
+    def _flash_status(self, text: str) -> None:
         bar = self.query_one("#status-bar", Static)
         bar.update(f" [bold]{text}[/]")
-        await self.set_timer(2.0, self._update_status)
+        self.set_timer(2.0, self._update_status)
 
     # ── Input handler ─────────────────────────────────────
 
@@ -444,8 +434,11 @@ class ChatApp(App):
         if event.text_area.id != "chat-input":
             return
         txt = event.text_area.text
-        suggestions = self.query_one("#command-suggestions", CommandSuggestions)
-        chat_input = self.query_one("#chat-input", ChatInput)
+        try:
+            suggestions = self.query_one("#command-suggestions", CommandSuggestions)
+            chat_input = self.query_one("#chat-input", ChatInput)
+        except Exception:
+            return
         if txt.startswith("/"):
             suggestions.filter(txt.lstrip("/"))
             suggestions.add_class("visible")
@@ -519,13 +512,9 @@ class ChatApp(App):
         else:
             self._flash_status(f"Unknown command: {cmd}  (type /help)")
 
-    def _set_model(self, arg: str) -> None:
-        alias = arg.strip().lower()
+    def _apply_model(self, alias: str) -> None:
         model_map = {"chat": "deepseek-chat", "pro": "deepseek-v4-pro", "v4": "deepseek-v4-pro"}
-        if not alias:
-            # Cycle between chat and pro
-            current = self.settings.default_model
-            alias = "pro" if current == "deepseek-chat" else "chat"
+        alias = alias.strip().lower()
         if alias in model_map:
             self.settings.default_model = model_map[alias]
             self.conversation = ConversationManager(
@@ -541,6 +530,22 @@ class ChatApp(App):
             self._flash_status(
                 f"Usage: /model chat | pro  (current: {self.settings.default_model})"
             )
+
+    def _set_model(self, arg: str) -> None:
+        alias = arg.strip().lower()
+        model_map = {"chat": "deepseek-chat", "pro": "deepseek-v4-pro", "v4": "deepseek-v4-pro"}
+        if not alias:
+            models = list(model_map.items())
+            screen = ModelListScreen(models, self.settings.default_model)
+
+            async def _select() -> None:
+                selected = await self.push_screen_wait(screen)
+                if selected:
+                    self._apply_model(selected)
+
+            self.run_worker(_select())
+            return
+        self._apply_model(alias)
 
     def _set_reasoning(self, arg: str) -> None:
         level = arg.strip().lower()
